@@ -1,7 +1,7 @@
 {
   "name": "multi-watcher",
   "version": "0.1.0",
-  "description": "Multi-watcher is a RPC-based inter-process node.js module to manage multiple file watchers.",
+  "description": "Multi-watcher is a inter-process node.js module to manage multiple file watchers.",
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
