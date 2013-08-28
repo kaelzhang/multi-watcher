@@ -24,11 +24,18 @@ function multi_watcher (options) {
 //      if options.cache is specified, 
 // - no_nested: {boolean} : TODO
 function MultiWatcher (options) {
+    EE.call(this);
+
+    if(!options.data_file){
+        throw new Error('`options.data_file` must be specified.');
+    }
+
     this.watcher = gaze();
     this.data_file = node_path.resolve(options.data_file);
     this.lock_file = this.data_file + '.lock';
-    this._watched = [];
+
     this.pid = process.pid;
+    this.cwd = options.cwd || process.cwd();
 
     this._init_events();
     this._init_cross_process_events();
@@ -36,6 +43,67 @@ function MultiWatcher (options) {
 
 util.inherits(MultiWatcher, EE);
 
+
+// Async method
+// @param {Array.<string>|string} files files to be watched,
+//      for better forward compatibility, should not use globule pattern
+MultiWatcher.prototype.watch = function (files, callback) {
+    var self = this;
+
+    // Use a file lock to prevent write conflict
+    lockup.lock(this.lock_file, function (err) {
+        if(err){
+            lockup.unlock(self.lock_file);
+            return callback(err);
+        }
+
+        var data = self._get_data();
+
+        makeArray(files).forEach(function (file) {
+            file = node_path.resolve(self.cwd, file);
+
+            if( !(file in data) ){
+                self.watcher.add(file, function () {
+                    
+                });
+
+                // {<pattern>: <pid>}
+                data[file] = self.pid;
+            }
+        });
+
+        // Write the data of the files being watched to the exchange file
+        self._save_data(data);
+
+        callback(null);
+    });
+
+    return this;
+};
+
+
+// Async method
+// Assign unwatch signals to all related processes
+// @param {Array.<string>|string} patterns
+MultiWatcher.prototype.unwatch = function (files, callback) {
+    var grouped = this._group_patterns_to_unwatch(files);
+    var pid;
+
+    for(pid in grouped){
+
+        // Send 'unwatch' signal to the corresponding process
+        ambassador.send(pid, 'unwatch', grouped[pid]);
+    }
+
+    lockup.unlock(this.lock_file);
+    callback();
+
+    return this;
+};
+
+
+// Private methods
+//////////////////////////////////////////////////////////////////////////////////////////
 
 MultiWatcher.prototype._init_events = function () {
     var self = this;
@@ -58,41 +126,12 @@ MultiWatcher.prototype._init_cross_process_events = function () {
 
 
 function makeArray(subject) {
-    return Array.isArray(subject) ? subject : [subject];
+    return Array.isArray(subject) ?
+        subject : 
+        subject === undefined || subject === null ?
+            [] :
+            [subject];
 }
-
-
-// Async method
-// @param {Array.<string>|string} files files to be watched,
-//      for better forward compatibility, should not use globule pattern
-MultiWatcher.prototype.watch = function (files, callback) {
-    var self = this;
-
-    // Use a file lock to prevent write conflict
-    lockup.lock(this.lock_file, function (err) {
-        if(err){
-            lockup.unlock(self.lock_file);
-            return callback(err);
-        }
-
-        var data = self._get_data();
-
-        makeArray(files).forEach(function (file) {
-            if( !(pattern in data) ){
-                self.watcher.add(file);
-                self._watched.push(file);
-
-                // {<pattern>: <pid>}
-                data[file] = self.pid;
-            }
-        });
-
-        // Write the data of the files being watched to the exchange file
-        self._save_data(data);
-
-        callback(null);
-    });
-};
 
 
 MultiWatcher.prototype.watched = function () {
@@ -104,7 +143,7 @@ MultiWatcher.prototype._get_data = function () {
     var data;
 
     try {
-        data = require(self.data_file);
+        data = require(this.data_file);
 
     // Silently fail
     } catch(e) {
@@ -121,33 +160,19 @@ MultiWatcher.prototype._save_data = function (data) {
 };
 
 
-// Async method
-// Assign unwatch signals to all related processes
-// @param {Array.<string>|string} patterns
-MultiWatcher.prototype.unwatch = function (files, callback) {
-    var data = this._get_data();
-    var grouped = this._group_patterns_to_unwatch(data, files);
-    var pid;
-
-    for(pid in grouped){
-
-        // Send 'unwatch' signal to the corresponding process
-        ambassador.send(pid, 'unwatch', grouped[pid]);
-    }
-
-    lockup.unlock(this.lock_file);
-    callback();
-};
-
-
 // @param {Array.<string>|string} files
-MultiWatcher.prototype._group_patterns_to_unwatch = function (data, files) {
+MultiWatcher.prototype._group_patterns_to_unwatch = function (files) {
+    var data = this._get_data();
     var grouped = {};
+    var cwd = this.cwd;
 
     makeArray(files).forEach(function (file) {
+        file = node_path.resolve(cwd, file);
         var pid = data[file];
 
-        add_to_group(grouped, pid, file);
+        if(pid){
+            add_to_group(grouped, pid, file);
+        }
     });
 
     return grouped;
@@ -181,11 +206,13 @@ MultiWatcher.prototype._unwatch = function (pid, files) {
         var pid = self.pid;
 
         // Only unwatch files belongs to the current multi-watcher
-        files = files.filter(function (pattern) {
+        files = makeArray(files).filter(function (pattern) {
             return data[pattern] === pid; 
         });
 
         files.forEach(function (file) {
+            file = node_path.resolve(self.cwd, file);
+
             self.watcher.remove(file);
             delete data[file];
         });
