@@ -4,10 +4,9 @@ module.exports = multi_watcher;
 
 var gaze        = require('gaze');
 var code        = require('code-this');
-var fs          = require('fs-sync');
+var node_fs     = require('fs');
 var lockup      = require('lockup');
 var ambassador  = require('ambassador');
-// var globule     = require('globule');
 
 var util        = require('util');
 var node_path   = require('path');
@@ -135,7 +134,7 @@ function makeArray(subject) {
 
 
 MultiWatcher.prototype.watched = function () {
-    return this.watcher.watched();    
+    return this.watcher.watched();
 };
 
 
@@ -155,7 +154,7 @@ MultiWatcher.prototype._get_data = function () {
 
 
 MultiWatcher.prototype._save_data = function (data) {
-    fs.write(this.data_file, 'module.exports = ' + code(data));
+    node_fs.writeFileSync(this.data_file, 'module.exports = ' + code(data));
     lockup.unlock(this.lock_file);
 };
 
