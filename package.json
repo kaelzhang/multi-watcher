@@ -1,6 +1,6 @@
 {
   "name": "multi-watcher",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Multi-watcher is a inter-process node.js module to manage multiple file watchers.",
   "main": "index.js",
   "scripts": {

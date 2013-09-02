@@ -49,11 +49,21 @@ util.inherits(MultiWatcher, EE);
 MultiWatcher.prototype.watch = function (files, callback) {
     var self = this;
 
+    function cb (err){
+        callback(err);
+        self.emit('watch', {
+            err: err,
+            files: files
+        });
+
+        cb = null;
+    };
+
     // Use a file lock to prevent write conflict
     lockup.lock(this.lock_file, function (err) {
         if(err){
             lockup.unlock(self.lock_file);
-            return callback(err);
+            return cb(err);
         }
 
         var data = self._get_data();
@@ -74,7 +84,7 @@ MultiWatcher.prototype.watch = function (files, callback) {
         // Write the data of the files being watched to the exchange file
         self._save_data(data);
 
-        callback(null);
+        cb(null);
     });
 
     return this;
@@ -199,28 +209,31 @@ MultiWatcher.prototype._unwatch = function (pid, files) {
     lockup.lock(this.lock_file, function (err) {
         if(err){
             lockup.unlock(err);
+        }else{
+            var data = self._get_data();
+            var pid = self.pid;
+
+            // Only unwatch files belongs to the current multi-watcher
+            files = makeArray(files).filter(function (pattern) {
+                return data[pattern] === pid; 
+            });
+
+            files.forEach(function (file) {
+                file = node_path.resolve(self.cwd, file);
+
+                self.watcher.remove(file);
+                delete data[file];
+            });
+            
+            self._save_data(data);
         }
 
-        var data = self._get_data();
-        var pid = self.pid;
-
-        // Only unwatch files belongs to the current multi-watcher
-        files = makeArray(files).filter(function (pattern) {
-            return data[pattern] === pid; 
+        self.emit('unwatch', {
+            err: err,
+            files: files,
+            from: pid
         });
-
-        files.forEach(function (file) {
-            file = node_path.resolve(self.cwd, file);
-
-            self.watcher.remove(file);
-            delete data[file];
-        });
-        
-        self._save_data(data);
     });
 };
-
-
-
 
 
