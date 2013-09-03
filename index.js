@@ -38,6 +38,13 @@ function MultiWatcher (options) {
 
     this._init_events();
     this._init_cross_process_events();
+
+    var self = this;
+
+    process.on('exit', function () {
+        // clean all 
+        self._unwatch_all();
+    });
 }
 
 util.inherits(MultiWatcher, EE);
@@ -71,14 +78,20 @@ MultiWatcher.prototype.watch = function (files, callback) {
         makeArray(files).forEach(function (file) {
             file = node_path.resolve(self.cwd, file);
 
-            if( !(file in data) ){
-                self.watcher.add(file, function () {
-                    
-                });
-
-                // {<pattern>: <pid>}
-                data[file] = self.pid;
+            if(
+                file in data && 
+                // If already watched by the current process, continue.
+                // Notice that there might be dirty data in the data file
+                data[file] === self.pid
+            ){
+                return;
             }
+
+            self.watcher.add(file, function () {
+            });
+
+            // {<pattern>: <pid>}
+            data[file] = self.pid;
         });
 
         // Write the data of the files being watched to the exchange file
@@ -234,6 +247,24 @@ MultiWatcher.prototype._unwatch = function (pid, files) {
             from: pid
         });
     });
+};
+
+
+MultiWatcher.prototype._unwatch_all = function () {
+    var data = this._get_data();
+    var file;
+    var pid;
+
+    for(file in data){
+        pid = data[file];
+
+        if(pid === this.pid){
+            this.watcher.remove(file);
+            delete data[file];
+        }
+    }
+
+    this._save_data(data);
 };
 
 
