@@ -78,13 +78,17 @@ MultiWatcher.prototype.watch = function (files, callback) {
         makeArray(files).forEach(function (file) {
             file = node_path.resolve(self.cwd, file);
 
-            if(
-                file in data && 
-                // If already watched by the current process, continue.
-                // Notice that there might be dirty data in the data file
-                data[file] === self.pid
-            ){
-                return;
+            if(file in data){
+                var owner_pid = data[file];
+                if(owner_pid === self.pid){
+                    // If already watched by the current process, continue.
+                    // Notice that there might be dirty data in the data file
+                    return;
+                }else{
+
+                    // If already watched by another process, try to notify the process to unwatch it
+                    ambassador.send(owner_pid, 'unwatch', file);
+                }
             }
 
             self.watcher.add(file, function () {
