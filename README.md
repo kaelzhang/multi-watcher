@@ -1,19 +1,19 @@
-# Multi-watcher
+# Stare
 
-Multi-watcher is a inter-process node.js module to manage multiple file watchers.
+Stare is a inter-process node.js module to manage multiple file watchers.
 
-With multi-watcher, you could avoid duplicately watching a same file or directory because multi-watcher instances could share with each other even if they are in different processes.
+With stare, you could avoid duplicately watching a same file or directory because stare instances could share with each other even if they are in different processes.
 
 
 ## Installation
 
-	npm install multi-watcher --save
+	npm install stare --save
 	
 ## Usage
 
 ```js
-var multi_watcher = require('multi-watcher');
-var watcher = multi_watcher({
+var stare = require('stare');
+var watcher = stare({
 	data_file: 'data.js'
 });
 ```

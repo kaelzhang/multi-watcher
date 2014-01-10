@@ -1,6 +1,6 @@
 'use strict';
 
-module.exports = multi_watcher;
+module.exports = stare;
 
 var gaze        = require('gaze');
 var code        = require('code-this');
@@ -13,8 +13,8 @@ var node_path   = require('path');
 var EE          = require('events').EventEmitter;
 
 
-function multi_watcher (options) {
-    return new MultiWatcher(options);
+function stare (options) {
+    return new Stare(options);
 }
 
 
@@ -22,7 +22,7 @@ function multi_watcher (options) {
 // - data_file: {path} the file to pass data between each process
 //      if options.cache is specified, 
 // - no_nested: {boolean} : TODO
-function MultiWatcher (options) {
+function Stare (options) {
     EE.call(this);
 
     if(!options.data_file){
@@ -47,13 +47,13 @@ function MultiWatcher (options) {
     });
 }
 
-util.inherits(MultiWatcher, EE);
+util.inherits(Stare, EE);
 
 
 // Async method
 // @param {Array.<string>|string} files files to be watched,
 //      for better forward compatibility, should not use globule pattern
-MultiWatcher.prototype.watch = function (files, callback) {
+Stare.prototype.watch = function (files, callback) {
     var self = this;
 
     function cb (err){
@@ -111,7 +111,7 @@ MultiWatcher.prototype.watch = function (files, callback) {
 // Async method
 // Assign unwatch signals to all related processes
 // @param {Array.<string>|string} patterns
-MultiWatcher.prototype.unwatch = function (files, callback) {
+Stare.prototype.unwatch = function (files, callback) {
     var grouped = this._group_patterns_to_unwatch(files);
     var pid;
 
@@ -131,7 +131,7 @@ MultiWatcher.prototype.unwatch = function (files, callback) {
 // Private methods
 //////////////////////////////////////////////////////////////////////////////////////////
 
-MultiWatcher.prototype._init_events = function () {
+Stare.prototype._init_events = function () {
     var self = this;
 
     // the same event as "gaze"
@@ -142,7 +142,7 @@ MultiWatcher.prototype._init_events = function () {
 };
 
 
-MultiWatcher.prototype._init_cross_process_events = function () {
+Stare.prototype._init_cross_process_events = function () {
     var self = this;
 
     ambassador.on('unwatch', function (pid, data) {
@@ -160,12 +160,12 @@ function makeArray(subject) {
 }
 
 
-MultiWatcher.prototype.watched = function () {
+Stare.prototype.watched = function () {
     return this.watcher.watched();
 };
 
 
-MultiWatcher.prototype._get_data = function () {
+Stare.prototype._get_data = function () {
     var data;
 
     try {
@@ -180,14 +180,14 @@ MultiWatcher.prototype._get_data = function () {
 };
 
 
-MultiWatcher.prototype._save_data = function (data) {
+Stare.prototype._save_data = function (data) {
     node_fs.writeFileSync(this.data_file, 'module.exports = ' + code(data));
     lockup.unlock(this.lock_file);
 };
 
 
 // @param {Array.<string>|string} files
-MultiWatcher.prototype._group_patterns_to_unwatch = function (files) {
+Stare.prototype._group_patterns_to_unwatch = function (files) {
     var data = this._get_data();
     var grouped = {};
     var cwd = this.cwd;
@@ -221,7 +221,7 @@ function add_to_group(groups, key, member){
 // Private method, no arguments overloading
 // Unwatch patterns
 // @param {Array.<string>} files
-MultiWatcher.prototype._unwatch = function (pid, files) {
+Stare.prototype._unwatch = function (pid, files) {
     var self = this;
     lockup.lock(this.lock_file, function (err) {
         if(err){
@@ -230,7 +230,7 @@ MultiWatcher.prototype._unwatch = function (pid, files) {
             var data = self._get_data();
             var pid = self.pid;
 
-            // Only unwatch files belongs to the current multi-watcher
+            // Only unwatch files belongs to the current stare
             files = makeArray(files).filter(function (pattern) {
                 return data[pattern] === pid; 
             });
@@ -254,7 +254,7 @@ MultiWatcher.prototype._unwatch = function (pid, files) {
 };
 
 
-MultiWatcher.prototype._unwatch_all = function () {
+Stare.prototype._unwatch_all = function () {
     var data = this._get_data();
     var file;
     var pid;
