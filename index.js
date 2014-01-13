@@ -9,7 +9,12 @@ var EE          = require('events').EventEmitter;
 
 // var lockup      = require('lockup');
 var axon        = require('axon');
-var chokidar    = require('chokidar');
+axon.codec.define('json', {
+    encode: JSON.stringify,
+    decode: JSON.parse
+});
+
+var gaze = require('gaze');
 
 
 function stare (options) {
@@ -25,7 +30,7 @@ function Stare (options) {
     }
 
     this.port = options.port;
-    this.timeout = options.timeout || 1000;
+    this.timeout = options.timeout || 3000;
 
     this._create_request_socket();
     // if the reply socket not responding, create one
@@ -38,6 +43,18 @@ node_util.inherits(Stare, EE);
 // Create request socket
 Stare.prototype._create_request_socket = function(callback) {
     this.sock = axon.socket('req');
+    this.sock.format('json');
+    this.sock.connect(this.port);
+};
+
+
+// Create reply(MASTER) socket
+Stare.prototype._create_reply_socket = function() {
+    this.reply_sock = axon.socket('rep');
+    this.reply_sock.format('json');
+    this.reply_sock.bind(this.port);
+
+    this._init_messages();
 };
 
 
@@ -48,6 +65,10 @@ Stare.prototype._check_reply_socket = function(callback) {
         if ( !alive ) {
             self._create_reply_socket();
         }
+
+        // fire the ready 
+        self.emit('ready');
+        self.is_ready = true;
     });
 };
 
@@ -63,86 +84,90 @@ Stare.prototype._heartbeat = function (callback) {
         }
 
         callback(null, res && res.alive);
-    });
+
+    }, true);
 };
 
 
-Stare.prototype._send = function(type, data, callback) {
+Stare.prototype._send = function(type, data, callback, no_wait ) {
     var self = this;
+    var timer;
+    var is_timeout;
+    var wait;
 
-    var timer = setTimeout(function () {
+    function timeout () {
         timer = null;
+        is_timeout = true;
         callback({
             code: 'ETIMEOUT',
-            message: 'Request to reply socket timeout.',
-            reason: 'timeout'
-        });
-
-    }, this.timeout);
-
-    this.sock.send(
-        type, 
-        process.pid, 
-        // Axon will send the data as a Buffer,
-        // so all object-type variables must be stringified first
-        this._encode(data), 
-        function (res) {
-
-            // if not timeout 
-            if ( timer ) {
-                clearTimeout(timer);
-
-                // `res` will be a buffer
-                self._decode(res, callback);
+            message: 'Request to reply socket timeout. Message: "' + type + '"',
+            reason: 'timeout',
+            data: {
+                message: type,
+                data: data
             }
+        });
+    }
+
+    function remove_listener () {
+        self.removeListener('ready', start_timer);
+    }
+
+    function start_timer () {
+        timer = setTimeout(timeout, self.timeout);
+    }
+
+    if ( no_wait || this.is_ready ) {
+        start_timer();
+    } else {
+        wait = true;
+        this.once('ready', start_timer);
+    }
+
+    this.sock.send({
+        action: type,
+        data: data,
+        pid: process.pid
+
+    }, function (res) {
+        // if not timeout 
+        if ( timer ) {
+            clearTimeout(timer);
         }
-    );
-};
 
+        if ( wait ) {
+            remove_listener();
+        }
 
-//
-Stare.prototype._encode = function(object) {
-    return JSON.stringify(object);
+        if ( !is_timeout ) {
+            // `res` will be a buffer
+            self._decode(res, callback);
+        }
+    });
 };
 
 
 // Data will transfer with the form of Stream
 Stare.prototype._decode = function(data, callback) {
-    if ( Buffer.isBuffer(data) ) {
-        data = data.toString(data);
-    }
-
-    try {
-        data = JSON.parse(data);
-    } catch(e) {
-        return callback({
-            code: 'E',
-            message: 'Error parse json'
-        });
-    }
-
     var error = null;
 
-    if ( data && data.error ) {
-        error = data.error;
+    if ( data ){
+        if (data.error ) {
+            error = data.error;
+        }
+
+        delete data.error;
     }
 
     callback(error, data);
 };
 
 
-// Create reply(MASTER) socket
-Stare.prototype._create_reply_socket = function() {
-    this.reply_sock = axon.socket('rep');
-    this._init_messages();
-};
-
-
 Stare.prototype._init_messages = function () {
     var self = this;
 
-    this.reply_sock.on('message', function (action, request_pid, data, reply) {
-        switch (action) {
+    this.reply_sock.on('message', function (msg, reply) {
+        switch (msg.action) {
             case 'heartbeat':
                 reply({
                     alive: true
@@ -150,21 +175,21 @@ Stare.prototype._init_messages = function () {
                 break;
 
             case 'watch':
-                self._watch(request_pid, data, function (err) {
+                self._watch(msg.pid, msg.data, function (err) {
                     reply({
                         error       : err,
                         exec_pid    : process.pid,
-                        request_pid : request_pid
+                        request_pid : msg.pid
                     });
                 });
                 break;
 
             case 'unwatch':
-                self._unwatch(data, function (err) {
+                self._unwatch(msg.pid, msg.data, function (err) {
                     reply({
                         error       : err,
                         exec_pid    : process.pid,
-                        request_pid : request_pid
+                        request_pid : msg.pid
                     });
                 });
                 break;
@@ -208,7 +233,7 @@ Stare.prototype._watch = function (request_pid, files, callback) {
 
 
 Stare.prototype._create_watcher = function(files) {
-    var watcher = chokidar.watch(files);
+    var watcher = gaze(files);
     this._bind_watcher_events(watcher);
 
     return watcher;
@@ -218,13 +243,19 @@ Stare.prototype._create_watcher = function(files) {
 Stare.prototype._bind_watcher_events = function(watcher) {
     var self = this;
 
-    ['add', 'addDir', 'change', 'unlink', 'unlinkDir', 'error'].forEach(function (event) {
+    // for chokidar
+    // ['add', 'addDir', 'change', 'unlink', 'unlinkDir', 'error']
+
+    ['all', 'added', 'changed', 'deleted', 'renamed', 'error', 'end'].forEach(function (event) {
         watcher.on(event, function (data) {
             self.emit(event, data);
         });
     });
 };
 
+
+// Public methods
+////////////////////////////////////////////////////////////////////////////////
 
 // real watch
 Stare.prototype.watch = function(files, callback) {
@@ -233,13 +264,7 @@ Stare.prototype.watch = function(files, callback) {
     }
 
     this._request_watch(files, callback);
-};
 
-
-// prepare
-Stare.prototype._load = function(callback) {
-    this._check_reply_socket(function (err, alive) {
-        
-    });
+    return this;
 };
 
