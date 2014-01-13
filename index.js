@@ -31,6 +31,7 @@ function Stares (options) {
 
     this.port = options.port;
     this.timeout = options.timeout || 3000;
+    this.watched = [];
 
     this._create_request_socket();
     // if the reply socket not responding, create one
@@ -125,7 +126,7 @@ Stares.prototype._send = function(type, data, callback, no_wait ) {
     }
 
     this.sock.send({
-        action: type,
+        task: type,
         data: data,
         pid: process.pid
 
@@ -167,7 +168,9 @@ Stares.prototype._init_messages = function () {
     var self = this;
 
     this.reply_sock.on('message', function (msg, reply) {
-        switch (msg.action) {
+        self.emit('message', msg);
+
+        switch (msg.task) {
             case 'heartbeat':
                 reply({
                     alive: true
@@ -212,7 +215,7 @@ Stares.prototype._init_messages = function () {
 // Tell the master server to watch the files
 // Data requested:
 // {
-//     action: {string} action type
+//     task: {string} task type
 //     data: {Object} data
 // }
 Stares.prototype._request_watch = function(files, callback) {
@@ -229,6 +232,11 @@ Stares.prototype._watch = function (request_pid, files, callback) {
         request_pid: request_pid,
         exec_pid: process.pid
     });
+};
+
+
+Stares.prototype._filter_files = function(first_argument) {
+    
 };
 
 
