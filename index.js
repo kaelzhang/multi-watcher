@@ -7,7 +7,7 @@ var node_util   = require('util');
 var node_path   = require('path');
 var EE          = require('events').EventEmitter;
 
-var lockup      = require('lockup');
+// var lockup      = require('lockup');
 var axon        = require('axon');
 var chokidar    = require('chokidar');
 
@@ -18,201 +18,85 @@ function stare (options) {
 
 
 // @param {Object} options
-// - data_file: {path} the file to pass data between each process
-//      if options.cache is specified,
 // - port: {number}
 function Stare (options) {
-    if(!options.data_file){
-         throw new Error('`options.data_file` must be specified.');
-    }
-
     if ( !options.port ) {
         throw new Error('');
     }
 
     this.port = options.port;
+    this.timeout = options.timeout || 1000;
 
-    this.watchers = {};
-
-    // this.watcher = gaze();
-    // this.data_file = node_path.resolve(options.data_file);
-    // this.lock_file = this.data_file + '.lock';
-
-    // this.pid = process.pid;
-    // this.cwd = options.cwd || process.cwd();
-
-    // this._init_events();
-    // this._init_cross_process_events();
-
-    // var self = this;
-
-    // process.on('exit', function () {
-    //     // clean all
-    //     self._unwatch_all();
-    // });
+    this._create_request_socket();
+    // if the reply socket not responding, create one
+    this._check_reply_socket();
 }
 
-util.inherits(Stare, EE);
-
-
-// Create reply socket
-Stare.prototype._create_reply_socket = function() {
-    this.sock = axon.socket('rep');
-    this.master = true;
-
-    this._init_messages();
-};
+node_util.inherits(Stare, EE);
 
 
 // Create request socket
-Stare.prototype._create_request_socket = function() {
+Stare.prototype._create_request_socket = function(callback) {
     this.sock = axon.socket('req');
 };
 
 
-Stare.prototype.is_master = function() {
-    return !!this.master;
-};
-
-
-Stare.prototype._init_messages = function () {
+Stare.prototype._check_reply_socket = function(callback) {
     var self = this;
 
-    this.sock.on('message', function (action, request_pid, data, reply) {
-        switch (action) {
-            case 'heartbeat':
-                reply({
-                    alive: true
-                });
-                break;
-
-            case 'watch':
-                self._watch(data, function (err) {
-                    reply({
-                        error       : err,
-                        exec_pid    : process.pid,
-                        request_pid : request_pid
-                    });
-                });
-                break;
-
-            case 'unwatch':
-                self._unwatch(data, function (err) {
-                    reply({
-                        error       : err,
-                        exec_pid    : process.pid,
-                        request_pid : request_pid
-                    });
-                });
-                break;
-
-            default:
-                reply({
-                    error: {
-                        code: 'E',
-                        message: 'unknown message.',
-                        data: {
-                            
-                        }
-                    }
-                });
+    this._heartbeat(function (err, alive) {
+        if ( !alive ) {
+            self._create_reply_socket();
         }
     });
 };
 
 
-Stare.prototype._get_data = function (callback) {
-    var data;
+// Try to send heartbeat message, it will be considered as failure if there encounters a timeout
+Stare.prototype._heartbeat = function (callback) {
+    this._send('heartbeat', null, function (err, res) {
+        if ( err && err.reason === 'timeout' ) {
+            err = null;
+            res = {
+                alive: false
+            };
+        }
 
-    try {
-        data = require(this.data_file);
-
-    // Silently fail
-    } catch(e) {
-        data = {};
-    }
-
-    callback(null, data);
-};
-
-
-// Tell the master server to watch the files
-// Data requested:
-// {
-//     action: {string} action type
-//     data: {Object} data
-// }
-Stare.prototype._request_watch = function(files, callback) {
-    this._send('watch', files, callback);
+        callback(null, res && res.alive);
+    });
 };
 
 
 Stare.prototype._send = function(type, data, callback) {
     var self = this;
 
-    this.sock.send(type, process.pid, data, function (res) {
-        self._decode(res, callback);
-    });
-};
-
-
-// The real watch
-// @param {Object} data
-Stare.prototype._watch = function (files, callback) {
-// {
-//         files: files,
-//         cwd: this.cwd,
-//         pid: process.pid
-
-//     }
-
-    var watcher = this._create_watcher(files);
-
-    callback(null);
-};
-
-
-Stare.prototype._create_watcher = function(files) {
-    var watcher = chokidar.watch(files);
-    this._bind_watcher_events(watcher);
-
-    return watcher;
-};
-
-
-Stare.prototype._bind_watcher_events = function(watcher) {
-    var self = this;
-
-    ['add', 'addDir', 'change', 'unlink', 'unlinkDir', 'error'].forEach(function (event) {
-        watcher.on(event, function (data) {
-            self.emit(event, data);
+    var timer = setTimeout(function () {
+        timer = null;
+        callback({
+            code: 'ETIMEOUT',
+            message: 'Request to reply socket timeout.',
+            reason: 'timeout'
         });
-    });
-};
 
+    }, this.timeout);
 
-Stare.prototype._check_reply_socket = function(callback) {
-    this._heartbeat(callback);
-};
+    this.sock.send(
+        type, 
+        process.pid, 
+        // Axon will send the data as a Buffer,
+        // so all object-type variables must be stringified first
+        this._encode(data), 
+        function (res) {
 
+            // if not timeout 
+            if ( timer ) {
+                clearTimeout(timer);
 
-Stare.prototype._heartbeat = function (callback) {
-    this._send('heartbeat', null, function (res) {
-        callback(null, res && res.alive);
-    });
-};
-
-
-// real watch
-Stare.prototype.watch = function(files, callback) {
-
-
-
-    if ( this.is_master() ) {
-        this._watch(files, callback);
-    } else {
-        this._request_watch(files, callback);
-    }
+                // `res` will be a buffer
+                self._decode(res, callback);
+            }
+        }
+    );
 };
 
 
@@ -244,5 +128,118 @@ Stare.prototype._decode = function(data, callback) {
     }
 
     callback(error, data);
+};
+
+
+// Create reply(MASTER) socket
+Stare.prototype._create_reply_socket = function() {
+    this.reply_sock = axon.socket('rep');
+    this._init_messages();
+};
+
+
+Stare.prototype._init_messages = function () {
+    var self = this;
+
+    this.reply_sock.on('message', function (action, request_pid, data, reply) {
+        switch (action) {
+            case 'heartbeat':
+                reply({
+                    alive: true
+                });
+                break;
+
+            case 'watch':
+                self._watch(request_pid, data, function (err) {
+                    reply({
+                        error       : err,
+                        exec_pid    : process.pid,
+                        request_pid : request_pid
+                    });
+                });
+                break;
+
+            case 'unwatch':
+                self._unwatch(data, function (err) {
+                    reply({
+                        error       : err,
+                        exec_pid    : process.pid,
+                        request_pid : request_pid
+                    });
+                });
+                break;
+
+            default:
+                reply({
+                    error: {
+                        code: 'E',
+                        message: 'unknown message.',
+                        data: {
+
+                        }
+                    }
+                });
+        }
+    });
+};
+
+
+// Tell the master server to watch the files
+// Data requested:
+// {
+//     action: {string} action type
+//     data: {Object} data
+// }
+Stare.prototype._request_watch = function(files, callback) {
+    this._send('watch', files, callback);
+};
+
+
+// The real watch
+// @param {Object} data
+Stare.prototype._watch = function (request_pid, files, callback) {
+    var watcher = this._create_watcher(files);
+
+    callback(null, {
+        request_pid: request_pid,
+        exec_pid: process.pid
+    });
+};
+
+
+Stare.prototype._create_watcher = function(files) {
+    var watcher = chokidar.watch(files);
+    this._bind_watcher_events(watcher);
+
+    return watcher;
+};
+
+
+Stare.prototype._bind_watcher_events = function(watcher) {
+    var self = this;
+
+    ['add', 'addDir', 'change', 'unlink', 'unlinkDir', 'error'].forEach(function (event) {
+        watcher.on(event, function (data) {
+            self.emit(event, data);
+        });
+    });
+};
+
+
+// real watch
+Stare.prototype.watch = function(files, callback) {
+    if ( !node_util.isArray(files) ) {
+        files = [files];
+    }
+
+    this._request_watch(files, callback);
+};
+
+
+// prepare
+Stare.prototype._load = function(callback) {
+    this._check_reply_socket(function (err, alive) {
+        
+    });
 };
 

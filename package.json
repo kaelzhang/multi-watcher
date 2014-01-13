@@ -25,14 +25,12 @@
   "bugs": {
     "url": "https://github.com/kaelzhang/node-stare/issues"
   },
+  "devDependencies": {
+    "chai": "~1.8.1",
+    "mocha": "~1.17.0"
+  },
   "dependencies": {
-    "gaze": "~0.4.1",
-    "lockup": "~0.1.0",
-    "fs-sync": "~0.2.2",
-    "code-this": "~0.1.2",
-    "ambassador": "~0.1.1",
     "chokidar": "~0.8.0",
-    "axon": "~1.0.0",
-    "async": "~0.2.9"
+    "axon": "~1.0.0"
   }
 }
