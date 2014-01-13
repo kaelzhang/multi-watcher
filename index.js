@@ -1,6 +1,6 @@
 'use strict';
 
-module.exports = stare;
+module.exports = stares;
 
 var node_fs     = require('fs');
 var node_util   = require('util');
@@ -17,14 +17,14 @@ axon.codec.define('json', {
 var gaze = require('gaze');
 
 
-function stare (options) {
-    return new Stare(options);
+function stares (options) {
+    return new Stares(options);
 }
 
 
 // @param {Object} options
 // - port: {number}
-function Stare (options) {
+function Stares (options) {
     if ( !options.port ) {
         throw new Error('');
     }
@@ -37,11 +37,11 @@ function Stare (options) {
     this._check_reply_socket();
 }
 
-node_util.inherits(Stare, EE);
+node_util.inherits(Stares, EE);
 
 
 // Create request socket
-Stare.prototype._create_request_socket = function(callback) {
+Stares.prototype._create_request_socket = function(callback) {
     this.sock = axon.socket('req');
     this.sock.format('json');
     this.sock.connect(this.port);
@@ -49,7 +49,7 @@ Stare.prototype._create_request_socket = function(callback) {
 
 
 // Create reply(MASTER) socket
-Stare.prototype._create_reply_socket = function() {
+Stares.prototype._create_reply_socket = function() {
     this.reply_sock = axon.socket('rep');
     this.reply_sock.format('json');
     this.reply_sock.bind(this.port);
@@ -58,7 +58,7 @@ Stare.prototype._create_reply_socket = function() {
 };
 
 
-Stare.prototype._check_reply_socket = function(callback) {
+Stares.prototype._check_reply_socket = function(callback) {
     var self = this;
 
     this._heartbeat(function (err, alive) {
@@ -74,7 +74,7 @@ Stare.prototype._check_reply_socket = function(callback) {
 
 
 // Try to send heartbeat message, it will be considered as failure if there encounters a timeout
-Stare.prototype._heartbeat = function (callback) {
+Stares.prototype._heartbeat = function (callback) {
     this._send('heartbeat', null, function (err, res) {
         if ( err && err.reason === 'timeout' ) {
             err = null;
@@ -89,7 +89,7 @@ Stare.prototype._heartbeat = function (callback) {
 };
 
 
-Stare.prototype._send = function(type, data, callback, no_wait ) {
+Stares.prototype._send = function(type, data, callback, no_wait ) {
     var self = this;
     var timer;
     var is_timeout;
@@ -148,7 +148,7 @@ Stare.prototype._send = function(type, data, callback, no_wait ) {
 
 
 // Data will transfer with the form of Stream
-Stare.prototype._decode = function(data, callback) {
+Stares.prototype._decode = function(data, callback) {
     var error = null;
 
     if ( data ){
@@ -163,7 +163,7 @@ Stare.prototype._decode = function(data, callback) {
 };
 
 
-Stare.prototype._init_messages = function () {
+Stares.prototype._init_messages = function () {
     var self = this;
 
     this.reply_sock.on('message', function (msg, reply) {
@@ -215,14 +215,14 @@ Stare.prototype._init_messages = function () {
 //     action: {string} action type
 //     data: {Object} data
 // }
-Stare.prototype._request_watch = function(files, callback) {
+Stares.prototype._request_watch = function(files, callback) {
     this._send('watch', files, callback);
 };
 
 
 // The real watch
 // @param {Object} data
-Stare.prototype._watch = function (request_pid, files, callback) {
+Stares.prototype._watch = function (request_pid, files, callback) {
     var watcher = this._create_watcher(files);
 
     callback(null, {
@@ -232,7 +232,7 @@ Stare.prototype._watch = function (request_pid, files, callback) {
 };
 
 
-Stare.prototype._create_watcher = function(files) {
+Stares.prototype._create_watcher = function(files) {
     var watcher = gaze(files);
     this._bind_watcher_events(watcher);
 
@@ -240,7 +240,7 @@ Stare.prototype._create_watcher = function(files) {
 };
 
 
-Stare.prototype._bind_watcher_events = function(watcher) {
+Stares.prototype._bind_watcher_events = function(watcher) {
     var self = this;
 
     // for chokidar
@@ -258,7 +258,7 @@ Stare.prototype._bind_watcher_events = function(watcher) {
 ////////////////////////////////////////////////////////////////////////////////
 
 // real watch
-Stare.prototype.watch = function(files, callback) {
+Stares.prototype.watch = function(files, callback) {
     if ( !node_util.isArray(files) ) {
         files = [files];
     }
