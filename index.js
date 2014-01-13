@@ -31,9 +31,10 @@ function Stares (options) {
 
     this.port = options.port;
     this.timeout = options.timeout || 3000;
+    this.permanent = options.permanent;
+
     this.watched = [];
 
-    this._create_request_socket();
     // if the reply socket not responding, create one
     this._check_reply_socket();
 }
@@ -41,11 +42,22 @@ function Stares (options) {
 node_util.inherits(Stares, EE);
 
 
+Stares.prototype._get_sock = function () {
+    if ( !this.sock ) {
+        this._create_request_socket();
+    }
+
+    return this.sock;
+};
+
+
 // Create request socket
 Stares.prototype._create_request_socket = function(callback) {
-    this.sock = axon.socket('req');
-    this.sock.format('json');
-    this.sock.connect(this.port);
+    var sock = axon.socket('req');
+    sock.format('json');
+    sock.connect(this.port);
+
+    this.sock = sock;
 };
 
 
@@ -95,11 +107,12 @@ Stares.prototype._send = function(type, data, callback, no_wait ) {
     var timer;
     var is_timeout;
     var wait;
+    var sock = this._get_sock();
 
     function timeout () {
         timer = null;
         is_timeout = true;
-        callback({
+        cb({
             code: 'ETIMEOUT',
             message: 'Request to reply socket timeout. Message: "' + type + '"',
             reason: 'timeout',
@@ -108,6 +121,15 @@ Stares.prototype._send = function(type, data, callback, no_wait ) {
                 data: data
             }
         });
+    }
+
+    function cb(err, data) {
+        // if is not permanent, close the socket
+        if ( !self.permanent ) {
+            sock.close();
+        }
+
+        callback(err, data);
     }
 
     function remove_listener () {
@@ -125,7 +147,7 @@ Stares.prototype._send = function(type, data, callback, no_wait ) {
         this.once('ready', start_timer);
     }
 
-    this.sock.send({
+    sock.send({
         task: type,
         data: data,
         pid: process.pid
@@ -142,7 +164,7 @@ Stares.prototype._send = function(type, data, callback, no_wait ) {
 
         if ( !is_timeout ) {
             // `res` will be a buffer
-            self._decode(res, callback);
+            self._decode(res, cb);
         }
     });
 };
