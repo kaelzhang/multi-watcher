@@ -9,6 +9,7 @@ var EE          = require('events').EventEmitter;
 
 var lockup      = require('lockup');
 var axon        = require('axon');
+var chokidar    = require('chokidar');
 
 
 function stare (options) {
@@ -18,7 +19,7 @@ function stare (options) {
 
 // @param {Object} options
 // - data_file: {path} the file to pass data between each process
-//      if options.cache is specified, 
+//      if options.cache is specified,
 // - port: {number}
 function Stare (options) {
     if(!options.data_file){
@@ -46,7 +47,7 @@ function Stare (options) {
     // var self = this;
 
     // process.on('exit', function () {
-    //     // clean all 
+    //     // clean all
     //     self._unwatch_all();
     // });
 }
@@ -77,10 +78,8 @@ Stare.prototype.is_master = function() {
 Stare.prototype._init_messages = function () {
     var self = this;
 
-    this.sock.on('message', function (msg, reply) {
-        msg = msg || {};
-
-        switch (msg.action) {
+    this.sock.on('message', function (action, request_pid, data, reply) {
+        switch (action) {
             case 'heartbeat':
                 reply({
                     alive: true
@@ -88,27 +87,33 @@ Stare.prototype._init_messages = function () {
                 break;
 
             case 'watch':
-                self._watch(msg.data, function (err) {
+                self._watch(data, function (err) {
                     reply({
-                        error: err
+                        error       : err,
+                        exec_pid    : process.pid,
+                        request_pid : request_pid
                     });
                 });
                 break;
 
             case 'unwatch':
-                self._unwatch(msg.data, function (err) {
+                self._unwatch(data, function (err) {
                     reply({
-                        error: err
+                        error       : err,
+                        exec_pid    : process.pid,
+                        request_pid : request_pid
                     });
                 });
-
                 break;
 
             default:
                 reply({
                     error: {
                         code: 'E',
-                        message: 'unknown message.'
+                        message: 'unknown message.',
+                        data: {
+                            
+                        }
                     }
                 });
         }
@@ -131,246 +136,113 @@ Stare.prototype._get_data = function (callback) {
 };
 
 
-Stare.prototype._heartbeat = function (callback) {
-    this.sock.send({
-        action: 'heartbeat'
+// Tell the master server to watch the files
+// Data requested:
+// {
+//     action: {string} action type
+//     data: {Object} data
+// }
+Stare.prototype._request_watch = function(files, callback) {
+    this._send('watch', files, callback);
+};
 
-    }, function (res) {
+
+Stare.prototype._send = function(type, data, callback) {
+    var self = this;
+
+    this.sock.send(type, process.pid, data, function (res) {
+        self._decode(res, callback);
+    });
+};
+
+
+// The real watch
+// @param {Object} data
+Stare.prototype._watch = function (files, callback) {
+// {
+//         files: files,
+//         cwd: this.cwd,
+//         pid: process.pid
+
+//     }
+
+    var watcher = this._create_watcher(files);
+
+    callback(null);
+};
+
+
+Stare.prototype._create_watcher = function(files) {
+    var watcher = chokidar.watch(files);
+    this._bind_watcher_events(watcher);
+
+    return watcher;
+};
+
+
+Stare.prototype._bind_watcher_events = function(watcher) {
+    var self = this;
+
+    ['add', 'addDir', 'change', 'unlink', 'unlinkDir', 'error'].forEach(function (event) {
+        watcher.on(event, function (data) {
+            self.emit(event, data);
+        });
+    });
+};
+
+
+Stare.prototype._check_reply_socket = function(callback) {
+    this._heartbeat(callback);
+};
+
+
+Stare.prototype._heartbeat = function (callback) {
+    this._send('heartbeat', null, function (res) {
         callback(null, res && res.alive);
     });
 };
 
 
-// Tell the master server to watch the files
-Stare.prototype._request_watch = function(files, callback) {
-    // body...
-};
-
-
-// The real watch
-Stare.prototype._watch = function (data, callback) {
-    
-};
-
-
-Stare.prototype._check_reply_socket = function(callback) {
-    // body...
-};
-
-
 // real watch
 Stare.prototype.watch = function(files, callback) {
-    // body...
+
+
+
+    if ( this.is_master() ) {
+        this._watch(files, callback);
+    } else {
+        this._request_watch(files, callback);
+    }
 };
 
 
-// // Async method
-// // @param {Array.<string>|string} files files to be watched,
-// //      for better forward compatibility, should not use globule pattern
-// Stare.prototype.watch = function (files, callback) {
-//     var self = this;
-
-//     function cb (err){
-//         callback(err);
-//         self.emit('watch', {
-//             err: err,
-//             files: files
-//         });
-
-//         cb = null;
-//     };
-
-//     // Use a file lock to prevent write conflict
-//     lockup.lock(this.lock_file, function (err) {
-//         if(err){
-//             lockup.unlock(self.lock_file);
-//             return cb(err);
-//         }
-
-//         var data = self._get_data();
-
-//         makeArray(files).forEach(function (file) {
-//             file = node_path.resolve(self.cwd, file);
-
-//             if(file in data){
-//                 var owner_pid = data[file];
-//                 if(owner_pid === self.pid){
-//                     // If already watched by the current process, continue.
-//                     // Notice that there might be dirty data in the data file
-//                     return;
-//                 }else{
-
-//                     // If already watched by another process, try to notify the process to unwatch it
-//                     ambassador.send(owner_pid, 'unwatch', file);
-//                 }
-//             }
-
-//             self.watcher.add(file, function () {
-//             });
-
-//             // {<pattern>: <pid>}
-//             data[file] = self.pid;
-//         });
-
-//         // Write the data of the files being watched to the exchange file
-//         self._save_data(data);
-
-//         cb(null);
-//     });
-
-//     return this;
-// };
+//
+Stare.prototype._encode = function(object) {
+    return JSON.stringify(object);
+};
 
 
-// // Async method
-// // Assign unwatch signals to all related processes
-// // @param {Array.<string>|string} patterns
-// Stare.prototype.unwatch = function (files, callback) {
-//     var grouped = this._group_patterns_to_unwatch(files);
-//     var pid;
+// Data will transfer with the form of Stream
+Stare.prototype._decode = function(data, callback) {
+    if ( Buffer.isBuffer(data) ) {
+        data = data.toString(data);
+    }
 
-//     for(pid in grouped){
+    try {
+        data = JSON.parse(data);
+    } catch(e) {
+        return callback({
+            code: 'E',
+            message: 'Error parse json'
+        });
+    }
 
-//         // Send 'unwatch' signal to the corresponding process
-//         ambassador.send(pid, 'unwatch', grouped[pid]);
-//     }
+    var error = null;
 
-//     lockup.unlock(this.lock_file);
-//     callback();
+    if ( data && data.error ) {
+        error = data.error;
+    }
 
-//     return this;
-// };
-
-
-// // Private methods
-// //////////////////////////////////////////////////////////////////////////////////////////
-
-// Stare.prototype._init_events = function () {
-//     var self = this;
-
-//     // the same event as "gaze"
-//     this.watcher.on('all', function (event, filepath) {
-//         self.emit(event, filepath);
-//         self.emit('all', event, filepath);
-//     });
-// };
-
-
-// Stare.prototype._init_cross_process_events = function () {
-//     var self = this;
-
-//     ambassador.on('unwatch', function (pid, data) {
-//         self._unwatch(pid, data);
-//     });
-// };
-
-
-// function makeArray(subject) {
-//     return Array.isArray(subject) ?
-//         subject : 
-//         subject === undefined || subject === null ?
-//             [] :
-//             [subject];
-// }
-
-
-// Stare.prototype.watched = function () {
-//     return this.watcher.watched();
-// };
-
-
-
-
-
-// Stare.prototype._save_data = function (data) {
-//     node_fs.writeFileSync(this.data_file, 'module.exports = ' + code(data));
-//     lockup.unlock(this.lock_file);
-// };
-
-
-// // @param {Array.<string>|string} files
-// Stare.prototype._group_patterns_to_unwatch = function (files) {
-//     var data = this._get_data();
-//     var grouped = {};
-//     var cwd = this.cwd;
-
-//     makeArray(files).forEach(function (file) {
-//         file = node_path.resolve(cwd, file);
-//         var pid = data[file];
-
-//         if(pid){
-//             add_to_group(grouped, pid, file);
-//         }
-//     });
-
-//     return grouped;
-// }
-
-
-// function add_to_group(groups, key, member){
-//     var group = groups[key];
-
-//     if(!group){
-//         group = groups[key] = [];
-//     }
-
-//     if( ! ~ group.indexOf(member) ){
-//         group.push(member);
-//     }
-// };
-
-
-// // Private method, no arguments overloading
-// // Unwatch patterns
-// // @param {Array.<string>} files
-// Stare.prototype._unwatch = function (pid, files) {
-//     var self = this;
-//     lockup.lock(this.lock_file, function (err) {
-//         if(err){
-//             lockup.unlock(err);
-//         }else{
-//             var data = self._get_data();
-//             var pid = self.pid;
-
-//             // Only unwatch files belongs to the current stare
-//             files = makeArray(files).filter(function (pattern) {
-//                 return data[pattern] === pid; 
-//             });
-
-//             files.forEach(function (file) {
-//                 file = node_path.resolve(self.cwd, file);
-
-//                 self.watcher.remove(file);
-//                 delete data[file];
-//             });
-            
-//             self._save_data(data);
-//         }
-
-//         self.emit('unwatch', {
-//             err: err,
-//             files: files,
-//             from: pid
-//         });
-//     });
-// };
-
-
-// Stare.prototype._unwatch_all = function () {
-//     var data = this._get_data();
-//     var file;
-//     var pid;
-
-//     for(file in data){
-//         pid = data[file];
-
-//         if(pid === this.pid){
-//             this.watcher.remove(file);
-//             delete data[file];
-//         }
-//     }
-
-//     this._save_data(data);
-// };
-
+    callback(error, data);
+};
 
