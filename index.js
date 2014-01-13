@@ -221,8 +221,8 @@ Stares.prototype._watch = function (request_pid, files, callback) {
     callback({
         error: null,
         pid: process.pid,
-        files: files,
-        watched: this._get_watched()
+        watched: files,
+        watching: this._get_watched()
     });
 };
 
@@ -238,8 +238,8 @@ Stares.prototype._unwatch = function (request_pid, files, callback) {
     callback({
         error: null,
         pid: process.pid,
-        files: files,
-        watched: this._get_watched()
+        unwatched: files,
+        watching: this._get_watched()
     });
 };
 
@@ -291,8 +291,11 @@ Stares.prototype._bind_watcher_events = function(watcher) {
     // ['add', 'addDir', 'change', 'unlink', 'unlinkDir', 'error']
 
     ['all', 'added', 'changed', 'deleted', 'renamed', 'error', 'end'].forEach(function (event) {
-        watcher.on(event, function (data) {
-            self.emit(event, data);
+        watcher.on(event, function () {
+            var args = [event];
+            args = args.concat.apply(args, arguments);
+
+            self.emit.apply(self, args);
         });
     });
 };
