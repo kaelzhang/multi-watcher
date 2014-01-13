@@ -10,6 +10,9 @@ stares({
 }).on('all', function () {
     console.log('changed', arguments)
     
+}).on('message', function(){
+    console.log('receive message', arguments)
+
 }).watch('package.json', function () {
     console.log('watched', arguments)
 })

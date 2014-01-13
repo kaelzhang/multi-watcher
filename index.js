@@ -178,24 +178,18 @@ Stares.prototype._init_messages = function () {
                 break;
 
             case 'watch':
-                self._watch(msg.pid, msg.data, function (err) {
-                    reply({
-                        error       : err,
-                        exec_pid    : process.pid,
-                        request_pid : msg.pid
-                    });
-                });
+                self._watch(msg.pid, msg.data, reply);
                 break;
 
-            case 'unwatch':
-                self._unwatch(msg.pid, msg.data, function (err) {
-                    reply({
-                        error       : err,
-                        exec_pid    : process.pid,
-                        request_pid : msg.pid
-                    });
-                });
-                break;
+            // case 'unwatch':
+            //     self._unwatch(msg.pid, msg.data, function (err) {
+            //         reply({
+            //             error       : err,
+            //             exec_pid    : process.pid,
+            //             request_pid : msg.pid
+            //         });
+            //     });
+            //     break;
 
             default:
                 reply({
@@ -226,25 +220,39 @@ Stares.prototype._request_watch = function(files, callback) {
 // The real watch
 // @param {Object} data
 Stares.prototype._watch = function (request_pid, files, callback) {
-    var watcher = this._create_watcher(files);
+    files = this._filter_files(files);
 
-    callback(null, {
-        request_pid: request_pid,
-        exec_pid: process.pid
+    if ( files.length ) {
+        this._add_watch(files);
+    }
+
+    callback({
+        error: null,
+        pid: process.pid,
+        files: files
     });
 };
 
 
-Stares.prototype._filter_files = function(first_argument) {
-    
+Stares.prototype._filter_files = function(files) {
+    var watched = this.watched;
+
+    return files.filter(function (file) {
+        if ( !~ watched.indexOf(file) ) {
+            watched.push(file);
+            return true;
+        }
+    });
 };
 
 
-Stares.prototype._create_watcher = function(files) {
-    var watcher = gaze(files);
-    this._bind_watcher_events(watcher);
+Stares.prototype._add_watch = function(files, callback) {
+    if ( !this.watcher ) {
+        this.watcher = gaze();
+        this._bind_watcher_events(this.watcher);
+    }
 
-    return watcher;
+    this.watcher.add(files);
 };
 
 
