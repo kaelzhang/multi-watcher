@@ -1,4 +1,4 @@
-# Stares
+# Stares [![NPM version](https://badge.fury.io/js/stares.png)](http://badge.fury.io/js/stares) [![Build Status](https://travis-ci.org/kaelzhang/node-stares.png?branch=master)](https://travis-ci.org/kaelzhang/node-stares) [![Dependency Status](https://gemnasium.com/kaelzhang/node-stares.png)](https://gemnasium.com/kaelzhang/node-stares)
 
 Stares is a inter-process node.js module to manage multiple file watchers.
 
@@ -13,15 +13,20 @@ With stares, you could avoid duplicately watching a same file or directory becau
 
 ```js
 var stares = require('stares');
-var watcher = stares({
-	data_file: 'data.js'
+
+stares({
+    port: 9807
+
+}).on('all', function(){
+    console.log('something changes');
+
+}).watch('package.json', function(err, msg){
 });
 ```
 
 
-## Methods
+## Instance Methods
 
-### watcher.watch(patterns, callback)
-
-### watcher.unwatch(patterns, callback)
+### .watch(file, callback)
+### .watch(files, callback)
 
