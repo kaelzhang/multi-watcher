@@ -13,6 +13,6 @@ stares({
 }).on('message', function(){
     console.log('receive message', arguments)
 
-}).watch('package.json', function () {
+}).unwatch('package.json', function () {
     console.log('watched', arguments)
 })

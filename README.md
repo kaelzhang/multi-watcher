@@ -27,6 +27,6 @@ stares({
 
 ## Instance Methods
 
-### .watch(file, callback)
 ### .watch(files, callback)
+### .unwatch(files, callback)
 

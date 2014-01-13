@@ -181,24 +181,16 @@ Stares.prototype._init_messages = function () {
                 self._watch(msg.pid, msg.data, reply);
                 break;
 
-            // case 'unwatch':
-            //     self._unwatch(msg.pid, msg.data, function (err) {
-            //         reply({
-            //             error       : err,
-            //             exec_pid    : process.pid,
-            //             request_pid : msg.pid
-            //         });
-            //     });
-            //     break;
+            case 'unwatch':
+                self._unwatch(msg.pid, msg.data, reply);
+                break;
 
             default:
                 reply({
                     error: {
-                        code: 'E',
-                        message: 'unknown message.',
-                        data: {
-
-                        }
+                        code: 'EUNKNOWNTASK',
+                        message: 'Stares: unknown task: "' + msg.task + '"',
+                        data: msg
                     }
                 });
         }
@@ -212,8 +204,8 @@ Stares.prototype._init_messages = function () {
 //     task: {string} task type
 //     data: {Object} data
 // }
-Stares.prototype._request_watch = function(files, callback) {
-    this._send('watch', files, callback);
+Stares.prototype._request = function(task, files, callback) {
+    this._send(task, files, callback);
 };
 
 
@@ -229,8 +221,31 @@ Stares.prototype._watch = function (request_pid, files, callback) {
     callback({
         error: null,
         pid: process.pid,
-        files: files
+        files: files,
+        watched: this._get_watched()
     });
+};
+
+
+Stares.prototype._unwatch = function (request_pid, files, callback) {
+    if ( files.length ) {
+        this._remove_watch(files);
+        this.watched = this.watched.filter(function (watched) {
+            return !~ files.indexOf(watched); 
+        });
+    }
+
+    callback({
+        error: null,
+        pid: process.pid,
+        files: files,
+        watched: this._get_watched()
+    });
+};
+
+
+Stares.prototype._get_watched = function() {
+    return [].concat(this.watched);
 };
 
 
@@ -246,13 +261,26 @@ Stares.prototype._filter_files = function(files) {
 };
 
 
-Stares.prototype._add_watch = function(files, callback) {
+Stares.prototype._add_watch = function(files) {
     if ( !this.watcher ) {
         this.watcher = gaze();
         this._bind_watcher_events(this.watcher);
     }
 
     this.watcher.add(files);
+};
+
+
+Stares.prototype._remove_watch = function(files) {
+    var watcher = this.watcher;
+
+    if ( !watcher ) {
+        return;
+    }
+
+    files.forEach(function (file) {
+        watcher.remove(file);
+    });
 };
 
 
@@ -279,7 +307,18 @@ Stares.prototype.watch = function(files, callback) {
         files = [files];
     }
 
-    this._request_watch(files, callback);
+    this._request('watch', files, callback);
+
+    return this;
+};
+
+
+Stares.prototype.unwatch = function(files, callback) {
+    if ( !node_util.isArray(files) ) {
+        files = [files];
+    }
+
+    this._request('unwatch', files, callback);
 
     return this;
 };
