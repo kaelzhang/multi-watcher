@@ -4,6 +4,8 @@ var expect = require('chai').expect;
 
 var stares = require('../');
 
+var action = process.argv[2] || 'watch';
+
 stares({
     port: 9099
 
@@ -13,6 +15,6 @@ stares({
 }).on('message', function(){
     console.log('receive message', arguments)
 
-}).unwatch('package.json', function () {
-    console.log('watched', arguments)
+})[action]('package.json', function () {
+    console.log(action, arguments)
 })

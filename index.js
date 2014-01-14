@@ -7,12 +7,7 @@ var node_util   = require('util');
 var node_path   = require('path');
 var EE          = require('events').EventEmitter;
 
-// var lockup      = require('lockup');
-var axon        = require('axon');
-axon.codec.define('json', {
-    encode: JSON.stringify,
-    decode: JSON.parse
-});
+var replier     = require('replier');
 
 var gaze = require('gaze');
 
@@ -30,159 +25,107 @@ function Stares (options) {
     }
 
     this.port = options.port;
-    this.timeout = options.timeout || 3000;
+    // this.timeout = options.timeout || 5000;
     this.permanent = options.permanent;
 
     this.watched = [];
 
     // if the reply socket not responding, create one
-    this._check_reply_socket();
+    this._init_sockets();
 }
 
 node_util.inherits(Stares, EE);
 
 
-Stares.prototype._get_sock = function () {
-    if ( !this.sock ) {
-        this._create_request_socket();
-    }
+// Methods of rpc
+////////////////////////////////////////////////////////////////////////////////
 
-    return this.sock;
-};
-
-
-// Create request socket
-Stares.prototype._create_request_socket = function(callback) {
-    var sock = axon.socket('req');
-    sock.format('json');
-    sock.connect(this.port);
-
-    this.sock = sock;
-};
+function once (fn, context) {
+    var no;
+    return function () {
+        if ( !no ) {
+            no = true;
+            return fn && fn.apply(context || null, arguments);
+        }
+    };
+}
 
 
-// Create reply(MASTER) socket
-Stares.prototype._create_reply_socket = function() {
-    this.reply_sock = axon.socket('rep');
-    this.reply_sock.format('json');
-    this.reply_sock.bind(this.port);
+Stares.prototype._init_sockets = function() {
+    var self = this;
 
-    this._init_messages();
+    this._check_reply_socket(function (err) {
+        if ( !err ) {
+            self._create_request_socket(function (err) {
+                if ( !err ) {
+                    self.emit('_ready');
+                    self.is_ready = true;
+                }
+            });
+        }
+    });
 };
 
 
 Stares.prototype._check_reply_socket = function(callback) {
     var self = this;
 
-    this._heartbeat(function (err, alive) {
+    // function cb (err) {
+    //     if ( err ) {
+    //         return callback(err);
+    //     }
+
+    //     // emit ready event
+    //     self.emit('ready');
+    //     self.is_ready = true;
+
+    //     callback(null);
+    // }
+
+    replier.check(this.port, function (alive) {
         if ( !alive ) {
-            self._create_reply_socket();
+            return self._create_reply_socket(callback);
         }
 
-        // fire the ready 
-        self.emit('ready');
-        self.is_ready = true;
+        callback(null);
     });
 };
 
 
-// Try to send heartbeat message, it will be considered as failure if there encounters a timeout
-Stares.prototype._heartbeat = function (callback) {
-    this._send('heartbeat', null, function (err, res) {
-        if ( err && err.reason === 'timeout' ) {
-            err = null;
-            res = {
-                alive: false
-            };
-        }
-
-        callback(null, res && res.alive);
-
-    }, true);
-};
-
-
-Stares.prototype._send = function(type, data, callback, no_wait ) {
+// Create reply(MASTER) socket
+Stares.prototype._create_reply_socket = function(callback) {
     var self = this;
-    var timer;
-    var is_timeout;
-    var wait;
-    var sock = this._get_sock();
+    var cb = once(callback);
 
-    function timeout () {
-        timer = null;
-        is_timeout = true;
-        cb({
-            code: 'ETIMEOUT',
-            message: 'Request to reply socket timeout. Message: "' + type + '"',
-            reason: 'timeout',
-            data: {
-                message: type,
-                data: data
-            }
-        });
-    }
+    this.is_master = true;
 
-    function cb(err, data) {
-        // if is not permanent, close the socket
-        if ( !self.permanent ) {
-            sock.close();
-        }
+    this.reply_sock = replier
+    .server()
+    .on('error', function (err) {
+        self.emit('error', err);
+        cb(err);
+    })
+    .on('listening', function () {
+        cb(null);
+    })
+    .listen(this.port);
 
-        callback(err, data);
-    }
-
-    function remove_listener () {
-        self.removeListener('ready', start_timer);
-    }
-
-    function start_timer () {
-        timer = setTimeout(timeout, self.timeout);
-    }
-
-    if ( no_wait || this.is_ready ) {
-        start_timer();
-    } else {
-        wait = true;
-        this.once('ready', start_timer);
-    }
-
-    sock.send({
-        task: type,
-        data: data,
-        pid: process.pid
-
-    }, function (res) {
-        // if not timeout 
-        if ( timer ) {
-            clearTimeout(timer);
-        }
-
-        if ( wait ) {
-            remove_listener();
-        }
-
-        if ( !is_timeout ) {
-            // `res` will be a buffer
-            self._decode(res, cb);
-        }
-    });
+    this._init_messages();
 };
 
 
-// Data will transfer with the form of Stream
-Stares.prototype._decode = function(data, callback) {
-    var error = null;
-
-    if ( data ){
-        if (data.error ) {
-            error = data.error;
-        }
-
-        delete data.error;
-    }
-
-    callback(error, data);
+// Create request socket
+Stares.prototype._create_request_socket = function(callback) {
+    var cb = once(callback);
+    this.socket = replier.client()
+    .on('error', function (err) {
+        self.emit('error', err);
+        cb(err);
+    })
+    .on('connect', function () {
+        cb(null);
+    })
+    .connect(this.port);
 };
 
 
@@ -220,6 +163,35 @@ Stares.prototype._init_messages = function () {
 };
 
 
+Stares.prototype._send = function(type, data, callback) {
+    var self = this;
+
+    this._ready(function () {
+        self.socket.send({
+            task: type,
+            data: data,
+            pid: process.pid
+
+        }, function (err, data) {
+            if ( !self.is_master && !self.permanent ) {
+                self.socket.end();
+            }
+            
+            callback(err, data);
+        });
+    });
+};
+
+
+Stares.prototype._ready = function(callback) {
+    if ( this.is_ready ) {
+        callback();
+    } else {
+        this.once('_ready', callback);
+    }
+};
+
+
 // Tell the master server to watch the files
 // Data requested:
 // {
@@ -230,6 +202,9 @@ Stares.prototype._request = function(task, files, callback) {
     this._send(task, files, callback);
 };
 
+
+// Methods about file watching
+////////////////////////////////////////////////////////////////////////////////
 
 // The real watch
 // @param {Object} data
@@ -312,6 +287,7 @@ Stares.prototype._bind_watcher_events = function(watcher) {
     // for chokidar
     // ['add', 'addDir', 'change', 'unlink', 'unlinkDir', 'error']
 
+    // gaze events
     ['all', 'added', 'changed', 'deleted', 'renamed', 'error', 'end'].forEach(function (event) {
         watcher.on(event, function () {
             var args = [event];
@@ -327,6 +303,12 @@ Stares.prototype._bind_watcher_events = function(watcher) {
 ////////////////////////////////////////////////////////////////////////////////
 
 // real watch
+// @param {function(err, data)} callback
+// - data: {
+//     pid: {number} the id of the process who accept the request
+//     watched: {Array.<path>} new files has been watched just now
+//     watching: {Array.<path>} the watching files
+// }    
 Stares.prototype.watch = function(files, callback) {
     if ( !node_util.isArray(files) ) {
         files = [files];
@@ -338,6 +320,12 @@ Stares.prototype.watch = function(files, callback) {
 };
 
 
+// @param {function(err, data)} callback
+// - data: {
+//     pid: {number}
+//     unwatched: {Array.<path>}
+//     watching: {Array.<path>}
+// }
 Stares.prototype.unwatch = function(files, callback) {
     if ( !node_util.isArray(files) ) {
         files = [files];
