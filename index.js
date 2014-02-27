@@ -137,7 +137,7 @@ Stares.prototype._init_messages = function () {
 
         switch (msg.task) {
             case 'heartbeat':
-                reply({
+                reply(null, {
                     alive: true
                 });
                 break;
@@ -152,11 +152,9 @@ Stares.prototype._init_messages = function () {
 
             default:
                 reply({
-                    error: {
-                        code: 'EUNKNOWNTASK',
-                        message: 'Stares: unknown task: "' + msg.task + '"',
-                        data: msg
-                    }
+                    code: 'EUNKNOWNTASK',
+                    message: 'Stares: unknown task: "' + msg.task + '"',
+                    data: msg
                 });
         }
     });
@@ -215,8 +213,7 @@ Stares.prototype._watch = function (request_pid, files, callback) {
         this._add_watch(files);
     }
 
-    callback({
-        error: null,
+    callback(null, {
         pid: process.pid,
         watched: files,
         watching: this._get_watched()
@@ -232,8 +229,7 @@ Stares.prototype._unwatch = function (request_pid, files, callback) {
         });
     }
 
-    callback({
-        error: null,
+    callback(null, {
         pid: process.pid,
         unwatched: files,
         watching: this._get_watched()
