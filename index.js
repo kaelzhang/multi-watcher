@@ -106,6 +106,7 @@ Stares.prototype._create_reply_socket = function(callback) {
         cb(err);
     })
     .on('listening', function () {
+        self.emit('listening');
         cb(null);
     })
     .listen(this.port);
@@ -123,6 +124,7 @@ Stares.prototype._create_request_socket = function(callback) {
         cb(err);
     })
     .on('connect', function () {
+        self.emit('connect');
         cb(null);
     })
     .connect(this.port);
@@ -175,7 +177,7 @@ Stares.prototype._send = function(type, data, callback) {
                 self.socket.end();
             }
             
-            callback(err, data);
+            callback && callback(err, data);
         });
     });
 };
@@ -206,14 +208,16 @@ Stares.prototype._request = function(task, files, callback) {
 
 // The real watch
 // @param {Object} data
-Stares.prototype._watch = function (request_pid, files, callback) {
+Stares.prototype._watch = function (request_pid, files, reply) {
     files = this._filter_files(files);
 
     if ( files.length ) {
         this._add_watch(files);
     }
 
-    callback(null, {
+    self.emit('watch', request_pid, files);
+
+    reply(null, {
         pid: process.pid,
         watched: files,
         watching: this._get_watched()
@@ -221,7 +225,7 @@ Stares.prototype._watch = function (request_pid, files, callback) {
 };
 
 
-Stares.prototype._unwatch = function (request_pid, files, callback) {
+Stares.prototype._unwatch = function (request_pid, files, reply) {
     if ( files.length ) {
         this._remove_watch(files);
         this.watched = this.watched.filter(function (watched) {
@@ -229,7 +233,9 @@ Stares.prototype._unwatch = function (request_pid, files, callback) {
         });
     }
 
-    callback(null, {
+    self.emit('unwatch', request_pid, files);
+
+    reply(null, {
         pid: process.pid,
         unwatched: files,
         watching: this._get_watched()
