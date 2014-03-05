@@ -69,19 +69,6 @@ Stares.prototype._init_sockets = function() {
 
 Stares.prototype._check_reply_socket = function(callback) {
     var self = this;
-
-    // function cb (err) {
-    //     if ( err ) {
-    //         return callback(err);
-    //     }
-
-    //     // emit ready event
-    //     self.emit('ready');
-    //     self.is_ready = true;
-
-    //     callback(null);
-    // }
-
     replier.check(this.port, function (alive) {
         if ( !alive ) {
             return self._create_reply_socket(callback);
@@ -117,7 +104,9 @@ Stares.prototype._create_reply_socket = function(callback) {
 
 // Create request socket
 Stares.prototype._create_request_socket = function(callback) {
+    var self = this;
     var cb = once(callback);
+
     this.socket = replier.client()
     .on('error', function (err) {
         self.emit('error', err);
@@ -215,7 +204,7 @@ Stares.prototype._watch = function (request_pid, files, reply) {
         this._add_watch(files);
     }
 
-    self.emit('watch', request_pid, files);
+    this.emit('watch', request_pid, files);
 
     reply(null, {
         pid: process.pid,
@@ -233,7 +222,7 @@ Stares.prototype._unwatch = function (request_pid, files, reply) {
         });
     }
 
-    self.emit('unwatch', request_pid, files);
+    this.emit('unwatch', request_pid, files);
 
     reply(null, {
         pid: process.pid,
