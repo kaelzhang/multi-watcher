@@ -1,6 +1,6 @@
 {
   "name": "stares",
-  "version": "1.5.4",
+  "version": "1.5.5",
   "description": "Stares is a inter-process node.js module to manage multiple file watchers.",
   "main": "index.js",
   "scripts": {
